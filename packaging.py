@@ -35,10 +35,27 @@ NOTE_MODEL = genanki.Model(
     templates=[
         {
             "name": "Card 1",
-            "qfmt": "{{German}}<br>{{Audio}}",
-            "afmt": '{{FrontSide}}<hr id="answer">{{English}}',
+            "qfmt": '<div class="german">{{German}}</div><div class="audio">{{Audio}}</div>',
+            "afmt": '{{FrontSide}}<hr id="answer"><div class="english">{{English}}</div>',
         },
     ],
+    css="""
+.card {
+    text-align: center;
+    font-family: arial;
+}
+.german {
+    font-size: 32px;
+    font-weight: bold;
+}
+.english {
+    font-size: 26px;
+    color: #444;
+}
+.audio {
+    margin-top: 10px;
+}
+""",
 )
 
 

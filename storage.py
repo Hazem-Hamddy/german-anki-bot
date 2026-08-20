@@ -51,7 +51,9 @@ def create_profile(telegram_user_id: str, profile_name: str):
 
 
 def get_decks(telegram_user_id: str, profile_name: str):
-    """Distinct deck names this profile has used, derived from the Log table."""
+    """Distinct deck names this profile has used, derived from the Log table,
+    minus any the user has hidden via /manage (stored comma-separated in the
+    profile row's 'hidden_decks' field)."""
     formula = (
         f"AND({{telegram_user_id}} = '{telegram_user_id}', "
         f"{{profile}} = '{profile_name}')"
@@ -62,7 +64,11 @@ def get_decks(telegram_user_id: str, profile_name: str):
         deck = r["fields"].get("deck")
         if deck and deck not in decks:
             decks.append(deck)
-    return decks
+
+    record = _find_profile_record(telegram_user_id, profile_name)
+    hidden_raw = record["fields"].get("hidden_decks", "") if record else ""
+    hidden = [d.strip() for d in hidden_raw.split(",") if d.strip()]
+    return [d for d in decks if d not in hidden]
 
 
 def _find_profile_record(telegram_user_id: str, profile_name: str):
@@ -92,6 +98,27 @@ def save_deck_choice(telegram_user_id: str, profile_name: str, deck_name: str):
             "profile_name": profile_name,
             "last_deck": deck_name,
         }, typecast=True)
+
+
+def hide_deck(telegram_user_id: str, profile_name: str, deck_name: str):
+    """'Deletes' a deck from the picker without touching its sentence
+    history in the Log table - just hides it from future menus."""
+    record = _find_profile_record(telegram_user_id, profile_name)
+    if not record:
+        return
+    hidden_raw = record["fields"].get("hidden_decks", "")
+    hidden = [d.strip() for d in hidden_raw.split(",") if d.strip()]
+    if deck_name not in hidden:
+        hidden.append(deck_name)
+    _profiles_table.update(record["id"], {"hidden_decks": ", ".join(hidden)}, typecast=True)
+
+
+def delete_profile(telegram_user_id: str, profile_name: str):
+    """Deletes the profile row itself. Log history for that profile is
+    left untouched (it's your record, not deleted with the profile)."""
+    record = _find_profile_record(telegram_user_id, profile_name)
+    if record:
+        _profiles_table.delete(record["id"])
 
 
 # --- Sentence log (also functions as your history / debug trail) ---

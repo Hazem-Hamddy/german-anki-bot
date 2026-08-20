@@ -26,6 +26,8 @@ from telegram.ext import (
 )
 import storage  # Step 3: real Google Sheets storage
 import deliver  # Step 7: translate + audio + packaging pipeline
+import keepalive  # Step 8: tiny web server so Render's free tier applies
+import manage  # Delete/edit saved profiles & decks
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -48,18 +50,28 @@ CHOOSING_PROFILE, CHOOSING_DECK, NEW_DECK_NAME, CHOOSING_FORMAT, RECEIVING_CONTE
 
 # --- Conversation steps ---
 
+async def ask_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool) -> int:
+    """Shows the profile picker. Used both as the entry point and as the
+    target of the '⬅️ Back' button from the deck step."""
+    user_id = context.user_data["telegram_user_id"]
+    profiles = storage.get_profiles(user_id)
+    buttons = [[InlineKeyboardButton(p, callback_data=f"profile:{p}")] for p in profiles]
+    buttons.append([InlineKeyboardButton("+ New profile", callback_data="profile:__new__")])
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+    text = "Whose profile is this for?"
+    markup = InlineKeyboardMarkup(buttons)
+    if edit:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.message.reply_text(text, reply_markup=markup)
+    return CHOOSING_PROFILE
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point: /start or any message when idle. Ask which profile."""
     user_id = update.effective_user.id
     context.user_data["telegram_user_id"] = user_id
-    profiles = storage.get_profiles(user_id)
-    buttons = [[InlineKeyboardButton(p, callback_data=f"profile:{p}")] for p in profiles]
-    buttons.append([InlineKeyboardButton("+ New profile", callback_data="profile:__new__")])
-    await update.message.reply_text(
-        "Whose profile is this for?",
-        reply_markup=InlineKeyboardMarkup(buttons),
-    )
-    return CHOOSING_PROFILE
+    return await ask_profile(update, context, edit=False)
 
 
 async def profile_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -80,6 +92,8 @@ async def profile_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         buttons = [
             [InlineKeyboardButton(f"Yes, use '{last_deck}'", callback_data=f"deck:{last_deck}")],
             [InlineKeyboardButton("Choose a different deck", callback_data="deck:__choose__")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="nav:profile"),
+             InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
         ]
         await query.edit_message_text(
             f"Last time you used '{last_deck}' for {profile}. Use it again?",
@@ -107,6 +121,8 @@ async def ask_deck(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: boo
     decks = storage.get_decks(user_id, profile)
     buttons = [[InlineKeyboardButton(d, callback_data=f"deck:{d}")] for d in decks]
     buttons.append([InlineKeyboardButton("+ New deck", callback_data="deck:__new__")])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:profile"),
+                     InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
     text = f"Which deck for {profile}?"
     markup = InlineKeyboardMarkup(buttons)
     if edit:
@@ -147,6 +163,8 @@ async def ask_format(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: b
         [InlineKeyboardButton("Type text", callback_data="format:text")],
         [InlineKeyboardButton(".txt file", callback_data="format:txt")],
         [InlineKeyboardButton(".csv file", callback_data="format:csv")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="nav:deck"),
+         InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
     ]
     text = "How do you want to send the sentences?"
     markup = InlineKeyboardMarkup(buttons)
@@ -233,6 +251,29 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
+async def nav_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles every '⬅️ Back' button. The target step is encoded in the
+    callback data itself (e.g. 'nav:profile' or 'nav:deck')."""
+    query = update.callback_query
+    await query.answer()
+    target = query.data.split(":", 1)[1]
+    if target == "profile":
+        return await ask_profile(update, context, edit=True)
+    elif target == "deck":
+        return await ask_deck(update, context, edit=True)
+    # Shouldn't happen, but fail safe rather than crash the conversation.
+    return await ask_profile(update, context, edit=True)
+
+
+async def cancel_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handles the '❌ Cancel' inline button (as opposed to the typed /cancel
+    command, which 'cancel' below still handles)."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Cancelled. Send anything to start over.")
+    return ConversationHandler.END
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Cancelled. Send anything to start over.")
     return ConversationHandler.END
@@ -259,10 +300,19 @@ def main():
                 MessageHandler(filters.Document.ALL, content_received),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel_button, pattern=r"^cancel$"),
+            CallbackQueryHandler(nav_back, pattern=r"^nav:"),
+        ],
     )
 
     app.add_handler(conv)
+    app.add_handler(manage.build_manage_handler())
+
+    keepalive.start_in_background()
+    logger.info("Keep-alive web server started.")
+
     logger.info("Bot starting (polling mode)...")
     app.run_polling()
 
