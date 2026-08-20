@@ -191,13 +191,17 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return ConversationHandler.END
 
+    logger.info(f"Logging {len(sentences)} sentence(s) to Airtable...")
     for s in sentences:
         await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, s, "queued")
+    logger.info("Logged to Airtable OK.")
 
     await update.message.reply_text(f"Got it — processing {len(sentences)} sentence(s)...")
 
     try:
+        logger.info("Starting pipeline (translate + audio + package)...")
         apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentences)
+        logger.info(f"Pipeline finished, file at {apkg_path}")
     except Exception as e:
         logger.exception("Pipeline failed")
         await update.message.reply_text(
@@ -212,6 +216,7 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             filename=f"{deck}.apkg",
             caption=f"{len(sentences)} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
         )
+    logger.info("File sent to user.")
 
     for s in sentences:
         await asyncio.to_thread(storage.mark_status, user_id, s, "done")

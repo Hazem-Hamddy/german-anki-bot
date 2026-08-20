@@ -26,7 +26,7 @@ from pyairtable import Api
 AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
 
-_api = Api(AIRTABLE_TOKEN)
+_api = Api(AIRTABLE_TOKEN, timeout=(5, 10))  # (connect timeout, read timeout) in seconds
 _profiles_table = _api.table(AIRTABLE_BASE_ID, "Profiles")
 _log_table = _api.table(AIRTABLE_BASE_ID, "Log")
 

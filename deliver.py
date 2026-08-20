@@ -14,10 +14,13 @@ No new accounts needed for this step - it only uses pieces already built.
 import os
 import tempfile
 import asyncio
+import logging
 
 import translate
 import audio
 import packaging
+
+logger = logging.getLogger(__name__)
 
 
 async def process_sentences_and_get_file(profile: str, deck: str, sentences: list) -> str:
@@ -32,10 +35,16 @@ async def process_sentences_and_get_file(profile: str, deck: str, sentences: lis
     cards = []
 
     for sentence in sentences:
+        logger.info(f"Translating: {sentence}")
         # translate_sentence is a blocking network call - run it in a
         # background thread so it can't freeze the whole bot if it's slow.
         english = await asyncio.to_thread(translate.translate_sentence, sentence)
+        logger.info(f"Translated to: {english}")
+
+        logger.info(f"Generating audio for: {sentence}")
         audio_path = await audio.generate_audio(sentence, output_dir=work_dir)
+        logger.info(f"Audio saved to: {audio_path}")
+
         cards.append({
             "german": sentence,
             "english": english,
@@ -43,6 +52,8 @@ async def process_sentences_and_get_file(profile: str, deck: str, sentences: lis
         })
 
     output_path = os.path.join(work_dir, f"{deck.replace(' ', '_')}.apkg")
+    logger.info("Packaging .apkg...")
     # build_package is also blocking (disk I/O) - same reasoning.
     await asyncio.to_thread(packaging.build_package, deck, cards, output_path)
+    logger.info("Packaging done.")
     return output_path

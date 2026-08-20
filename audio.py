@@ -8,6 +8,7 @@ Requirements (installed on the host, not here):
 """
 
 import hashlib
+import asyncio
 import edge_tts
 
 # A natural-sounding female German voice. Full voice list:
@@ -22,11 +23,13 @@ def _filename_for(sentence: str) -> str:
     return f"audio_{h}.mp3"
 
 
-async def generate_audio(sentence: str, output_dir: str = ".") -> str:
+async def generate_audio(sentence: str, output_dir: str = ".", timeout_seconds: int = 15) -> str:
     """Generates an mp3 for the given German sentence.
-    Returns the file path it was saved to."""
+    Returns the file path it was saved to.
+    Raises TimeoutError if edge-tts doesn't respond in time, instead of
+    hanging forever (this is the fix for the silent-freeze bug)."""
     filename = _filename_for(sentence)
     path = f"{output_dir}/{filename}"
     communicate = edge_tts.Communicate(sentence, GERMAN_VOICE)
-    await communicate.save(path)
+    await asyncio.wait_for(communicate.save(path), timeout=timeout_seconds)
     return path
