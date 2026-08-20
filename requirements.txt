@@ -1,0 +1,5 @@
+python-telegram-bot==21.6
+pyairtable==2.3.3
+deep-translator==1.11.4
+edge-tts==6.1.12
+genanki==0.13.1
