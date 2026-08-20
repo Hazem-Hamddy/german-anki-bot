@@ -18,10 +18,13 @@ Requirements (installed on the host, not here):
 
 import os
 import datetime
+import logging
 from pyairtable import Api
+import requests
 
-# --- Config: set these as environment variables on the host (Step 8) ---
-# ---- Config: set these as environment variables on Railway (Step 8) ----
+logger = logging.getLogger(__name__)
+
+# --- Config: set these as environment variables on Railway (Step 8) ---
 # Never hardcode real credentials here - this file goes into GitHub.
 AIRTABLE_TOKEN = os.environ.get("AIRTABLE_TOKEN")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID")
@@ -94,14 +97,21 @@ def save_deck_choice(telegram_user_id: str, profile_name: str, deck_name: str):
 # --- Sentence log (also functions as your history / debug trail) ---
 
 def log_sentence(telegram_user_id: str, profile: str, deck: str, sentence: str, status: str = "queued"):
-    _log_table.create({
-        "timestamp": datetime.datetime.utcnow().isoformat(),
-        "telegram_user_id": str(telegram_user_id),
-        "profile": profile,
-        "deck": deck,
-        "sentence": sentence,
-        "status": status,
-    })
+    try:
+        _log_table.create({
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "telegram_user_id": str(telegram_user_id),
+            "profile": profile,
+            "deck": deck,
+            "sentence": sentence,
+            "status": status,
+        })
+    except requests.exceptions.HTTPError as e:
+        # Surface Airtable's actual error message (e.g. "unknown field name")
+        # instead of a generic traceback that hides the real cause.
+        body = e.response.text if e.response is not None else "(no response body)"
+        logger.error(f"Airtable rejected log_sentence: {body}")
+        raise
 
 
 def mark_status(telegram_user_id: str, sentence: str, new_status: str):

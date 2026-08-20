@@ -192,9 +192,18 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     logger.info(f"Logging {len(sentences)} sentence(s) to Airtable...")
-    for s in sentences:
-        await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, s, "queued")
-    logger.info("Logged to Airtable OK.")
+    try:
+        for s in sentences:
+            await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, s, "queued")
+        logger.info("Logged to Airtable OK.")
+    except Exception as e:
+        logger.exception("Failed to log sentences to Airtable")
+        await update.message.reply_text(
+            f"Couldn't save to Airtable: {e}\n"
+            f"Check that the Log table's field names match exactly: "
+            f"timestamp, telegram_user_id, profile, deck, sentence, status."
+        )
+        return ConversationHandler.END
 
     await update.message.reply_text(f"Got it — processing {len(sentences)} sentence(s)...")
 
