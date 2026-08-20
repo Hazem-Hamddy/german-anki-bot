@@ -47,7 +47,7 @@ def create_profile(telegram_user_id: str, profile_name: str):
         "telegram_user_id": str(telegram_user_id),
         "profile_name": profile_name,
         "last_deck": "",
-    })
+    }, typecast=True)
 
 
 def get_decks(telegram_user_id: str, profile_name: str):
@@ -84,14 +84,14 @@ def get_last_deck(telegram_user_id: str, profile_name: str):
 def save_deck_choice(telegram_user_id: str, profile_name: str, deck_name: str):
     record = _find_profile_record(telegram_user_id, profile_name)
     if record:
-        _profiles_table.update(record["id"], {"last_deck": deck_name})
+        _profiles_table.update(record["id"], {"last_deck": deck_name}, typecast=True)
     else:
         # profile row not found for this user - create it
         _profiles_table.create({
             "telegram_user_id": str(telegram_user_id),
             "profile_name": profile_name,
             "last_deck": deck_name,
-        })
+        }, typecast=True)
 
 
 # --- Sentence log (also functions as your history / debug trail) ---
@@ -105,7 +105,10 @@ def log_sentence(telegram_user_id: str, profile: str, deck: str, sentence: str, 
             "deck": deck,
             "sentence": sentence,
             "status": status,
-        })
+        }, typecast=True)
+        # typecast=True tells Airtable to accept any text value even if a
+        # column was accidentally created as "Single select" instead of
+        # "Single line text" - this is what was causing the 422 error.
     except requests.exceptions.HTTPError as e:
         # Surface Airtable's actual error message (e.g. "unknown field name")
         # instead of a generic traceback that hides the real cause.
@@ -125,7 +128,7 @@ def mark_status(telegram_user_id: str, sentence: str, new_status: str):
         # Airtable doesn't guarantee order; sort by timestamp to get the most recent
         records.sort(key=lambda r: r["fields"].get("timestamp", ""))
         latest = records[-1]
-        _log_table.update(latest["id"], {"status": new_status})
+        _log_table.update(latest["id"], {"status": new_status}, typecast=True)
 
 
 def get_queued_sentences(telegram_user_id: str = None):
