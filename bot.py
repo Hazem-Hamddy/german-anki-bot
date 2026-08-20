@@ -27,6 +27,7 @@ from telegram.ext import (
 import storage  # Step 3: real Google Sheets storage
 import deliver  # Step 7: translate + audio + packaging pipeline
 import manage  # Delete/edit saved profiles & decks
+import fileparse  # .txt / .csv upload parsing
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -198,20 +199,48 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = context.user_data["telegram_user_id"]
 
     if fmt == "text":
-        sentences = [s.strip() for s in update.message.text.split("\n") if s.strip()]
+        text_lines = [s.strip() for s in update.message.text.split("\n") if s.strip()]
+        sentence_items = [{"sentence": s, "translation": None} for s in text_lines]
+
+    elif fmt in ("txt", "csv"):
+        if not update.message.document:
+            await update.message.reply_text(
+                f"I was expecting a .{fmt} file — please attach one, or /cancel to start over."
+            )
+            return RECEIVING_CONTENT
+
+        doc = update.message.document
+        expected_ext = f".{fmt}"
+        if not doc.file_name.lower().endswith(expected_ext):
+            await update.message.reply_text(
+                f"That file doesn't look like a {expected_ext} file (got '{doc.file_name}'). "
+                f"Please send a {expected_ext} file, or /cancel to start over."
+            )
+            return RECEIVING_CONTENT
+
+        telegram_file = await doc.get_file()
+        file_bytes = bytes(await telegram_file.download_as_bytearray())
+
+        try:
+            if fmt == "txt":
+                sentence_items = fileparse.parse_txt(file_bytes)
+            else:
+                sentence_items = fileparse.parse_csv(file_bytes)
+        except (ValueError, UnicodeDecodeError) as e:
+            await update.message.reply_text(f"Couldn't read that file: {e}")
+            return RECEIVING_CONTENT
+
+        if not sentence_items:
+            await update.message.reply_text("That file didn't contain any sentences.")
+            return RECEIVING_CONTENT
     else:
-        # .txt / .csv file handling is not wired up yet - only plain text
-        # messages run the full pipeline for now.
-        await update.message.reply_text(
-            "File uploads aren't wired up to the pipeline yet — for now, "
-            "please type or paste your sentence(s) as a text message."
-        )
+        await update.message.reply_text("Unexpected format — please /cancel and start over.")
         return ConversationHandler.END
 
-    logger.info(f"Logging {len(sentences)} sentence(s) to Airtable...")
+    logger.info(f"Logging {len(sentence_items)} sentence(s) to Airtable...")
     try:
-        for s in sentences:
-            await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, s, "queued")
+        for item in sentence_items:
+            await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, item["sentence"], "queued")
         logger.info("Logged to Airtable OK.")
     except Exception as e:
         logger.exception("Failed to log sentences to Airtable")
@@ -222,11 +251,11 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return ConversationHandler.END
 
-    await update.message.reply_text(f"Got it — processing {len(sentences)} sentence(s)...")
+    await update.message.reply_text(f"Got it — processing {len(sentence_items)} sentence(s)...")
 
     try:
         logger.info("Starting pipeline (translate + audio + package)...")
-        apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentences)
+        apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentence_items)
         logger.info(f"Pipeline finished, file at {apkg_path}")
     except Exception as e:
         logger.exception("Pipeline failed")
@@ -240,12 +269,12 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_document(
             document=f,
             filename=f"{deck}.apkg",
-            caption=f"{len(sentences)} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
+            caption=f"{len(sentence_items)} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
         )
     logger.info("File sent to user.")
 
-    for s in sentences:
-        await asyncio.to_thread(storage.mark_status, user_id, s, "done")
+    for item in sentence_items:
+        await asyncio.to_thread(storage.mark_status, user_id, item["sentence"], "done")
 
     return ConversationHandler.END
 

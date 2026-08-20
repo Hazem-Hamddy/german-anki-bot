@@ -23,23 +23,32 @@ import packaging
 logger = logging.getLogger(__name__)
 
 
-async def process_sentences_and_get_file(profile: str, deck: str, sentences: list) -> str:
+async def process_sentences_and_get_file(profile: str, deck: str, sentence_items: list) -> str:
     """
-    Runs the full pipeline for a batch of German sentences:
-    translate each one, generate its audio, package everything into
-    a single .apkg for the given deck.
+    Runs the full pipeline for a batch of German sentences.
+
+    sentence_items: list of dicts, each with:
+        "sentence": str (required)
+        "translation": str or None (if provided, skips auto-translation)
 
     Returns the path to the finished .apkg file, ready to send.
     """
     work_dir = tempfile.mkdtemp(prefix="anki_batch_")
     cards = []
 
-    for sentence in sentences:
-        logger.info(f"Translating: {sentence}")
-        # translate_sentence is a blocking network call - run it in a
-        # background thread so it can't freeze the whole bot if it's slow.
-        english = await asyncio.to_thread(translate.translate_sentence, sentence)
-        logger.info(f"Translated to: {english}")
+    for item in sentence_items:
+        sentence = item["sentence"]
+        manual_translation = item.get("translation")
+
+        if manual_translation:
+            english = manual_translation
+            logger.info(f"Using provided translation for: {sentence}")
+        else:
+            logger.info(f"Translating: {sentence}")
+            # translate_sentence is a blocking network call - run it in a
+            # background thread so it can't freeze the whole bot if it's slow.
+            english = await asyncio.to_thread(translate.translate_sentence, sentence)
+            logger.info(f"Translated to: {english}")
 
         logger.info(f"Generating audio for: {sentence}")
         audio_path = await audio.generate_audio(sentence, output_dir=work_dir)
