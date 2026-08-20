@@ -26,7 +26,6 @@ from telegram.ext import (
 )
 import storage  # Step 3: real Google Sheets storage
 import deliver  # Step 7: translate + audio + packaging pipeline
-import keepalive  # Step 8: tiny web server so Render's free tier applies
 import manage  # Delete/edit saved profiles & decks
 
 logging.basicConfig(
@@ -309,9 +308,6 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(manage.build_manage_handler())
-
-    keepalive.start_in_background()
-    logger.info("Keep-alive web server started.")
 
     logger.info("Bot starting (polling mode)...")
     app.run_polling()
