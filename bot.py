@@ -13,6 +13,7 @@ Requirements (installed on the host in Step 8, not here):
 
 import logging
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -191,11 +192,19 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     for s in sentences:
-        storage.log_sentence(user_id, profile, deck, s, status="queued")
+        await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, s, "queued")
 
     await update.message.reply_text(f"Got it — processing {len(sentences)} sentence(s)...")
 
-    apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentences)
+    try:
+        apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentences)
+    except Exception as e:
+        logger.exception("Pipeline failed")
+        await update.message.reply_text(
+            f"Something went wrong while processing: {e}\n"
+            f"Your sentence(s) are still saved in Airtable as 'queued' — nothing is lost."
+        )
+        return ConversationHandler.END
 
     with open(apkg_path, "rb") as f:
         await update.message.reply_document(
@@ -205,7 +214,7 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
     for s in sentences:
-        storage.mark_status(user_id, s, "done")
+        await asyncio.to_thread(storage.mark_status, user_id, s, "done")
 
     return ConversationHandler.END
 
