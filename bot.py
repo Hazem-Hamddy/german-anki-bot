@@ -289,11 +289,11 @@ async def confirm_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return RECEIVING_CONTENT
 
     # choice == "yes"
-    await query.edit_message_text("Got it — processing now...")
-    return await process_and_deliver(update, context)
+    status_message = await query.edit_message_text("Got it — processing now...")
+    return await process_and_deliver(update, context, status_message)
 
 
-async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE, status_message) -> int:
     """Logs each sentence, then runs the full pipeline (translate + audio +
     package) and sends the finished .apkg back in this chat."""
     profile = context.user_data["profile"]
@@ -301,8 +301,9 @@ async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = context.user_data["telegram_user_id"]
     sentence_items = context.user_data["pending_items"]
     chat = update.effective_chat
+    total = len(sentence_items)
 
-    logger.info(f"Logging {len(sentence_items)} sentence(s) to Airtable...")
+    logger.info(f"Logging {total} sentence(s) to Airtable...")
     try:
         for item in sentence_items:
             await asyncio.to_thread(storage.log_sentence, user_id, profile, deck, item["sentence"], "queued")
@@ -316,9 +317,20 @@ async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return ConversationHandler.END
 
+    async def report_progress(current: int, total_count: int):
+        # Only bother updating for batches worth showing progress on -
+        # a single sentence doesn't need a "1 of 1" message.
+        if total_count > 1:
+            try:
+                await status_message.edit_text(f"Processing {current} of {total_count}...")
+            except Exception:
+                pass  # if Telegram rate-limits an edit, just skip that one update
+
     try:
         logger.info("Starting pipeline (translate + audio + package)...")
-        apkg_path = await deliver.process_sentences_and_get_file(profile, deck, sentence_items)
+        apkg_path = await deliver.process_sentences_and_get_file(
+            profile, deck, sentence_items, progress_callback=report_progress
+        )
         logger.info(f"Pipeline finished, file at {apkg_path}")
     except Exception as e:
         logger.exception("Pipeline failed")
@@ -332,7 +344,7 @@ async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE
         await chat.send_document(
             document=f,
             filename=f"{deck}.apkg",
-            caption=f"{len(sentence_items)} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
+            caption=f"{total} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
         )
     logger.info("File sent to user.")
 

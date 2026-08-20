@@ -23,7 +23,9 @@ import packaging
 logger = logging.getLogger(__name__)
 
 
-async def process_sentences_and_get_file(profile: str, deck: str, sentence_items: list) -> str:
+async def process_sentences_and_get_file(
+    profile: str, deck: str, sentence_items: list, progress_callback=None
+) -> str:
     """
     Runs the full pipeline for a batch of German sentences.
 
@@ -31,12 +33,19 @@ async def process_sentences_and_get_file(profile: str, deck: str, sentence_items
         "sentence": str (required)
         "translation": str or None (if provided, skips auto-translation)
 
+    progress_callback: optional async function called as
+        progress_callback(current_index, total) after each sentence
+        finishes (1-based, e.g. 1, 2, 3... total) - lets the caller show
+        "Processing 3 of 10..." without this module knowing anything
+        about Telegram.
+
     Returns the path to the finished .apkg file, ready to send.
     """
     work_dir = tempfile.mkdtemp(prefix="anki_batch_")
     cards = []
+    total = len(sentence_items)
 
-    for item in sentence_items:
+    for i, item in enumerate(sentence_items, start=1):
         sentence = item["sentence"]
         manual_translation = item.get("translation")
 
@@ -59,6 +68,9 @@ async def process_sentences_and_get_file(profile: str, deck: str, sentence_items
             "english": english,
             "audio_path": audio_path,
         })
+
+        if progress_callback:
+            await progress_callback(i, total)
 
     output_path = os.path.join(work_dir, f"{deck.replace(' ', '_')}.apkg")
     logger.info("Packaging .apkg...")
