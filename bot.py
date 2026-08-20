@@ -216,8 +216,15 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             return RECEIVING_CONTENT
 
-        telegram_file = await doc.get_file()
-        file_bytes = bytes(await telegram_file.download_as_bytearray())
+        try:
+            telegram_file = await doc.get_file()
+            file_bytes = bytes(await telegram_file.download_as_bytearray())
+        except Exception as e:
+            logger.exception("Failed to download uploaded file from Telegram")
+            await update.message.reply_text(
+                f"Couldn't download that file ({e}). Please try sending it again."
+            )
+            return RECEIVING_CONTENT
 
         try:
             if fmt == "txt":
