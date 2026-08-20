@@ -50,7 +50,6 @@ NOTE_MODEL = genanki.Model(
 }
 .english {
     font-size: 26px;
-    color: #444;
 }
 .audio {
     margin-top: 10px;
