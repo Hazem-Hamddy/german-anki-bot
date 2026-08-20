@@ -11,9 +11,16 @@ import hashlib
 import asyncio
 import edge_tts
 
-# A natural-sounding female German voice. Full voice list:
-# run `edge-tts --list-voices` on the host if you want to pick a different one.
-GERMAN_VOICE = "de-DE-KatjaNeural"
+# German neural voices worth trying, roughly newest/most natural first.
+# To switch, just change GERMAN_VOICE to one of these:
+#   "de-DE-SeraphinaMultilingualNeural"  <- newer, generally the most natural/human-sounding
+#   "de-DE-FlorianMultilingualNeural"    <- newer male voice, also natural
+#   "de-DE-ConradNeural"                 <- older male voice, clear
+#   "de-DE-KatjaNeural"                  <- original default, can sound clipped/fast
+GERMAN_VOICE = "de-DE-SeraphinaMultilingualNeural"
+
+# Negative = slower. "-15%" noticeably slows speech without distorting pitch.
+SPEECH_RATE = "-15%"
 
 
 def _filename_for(sentence: str) -> str:
@@ -30,6 +37,6 @@ async def generate_audio(sentence: str, output_dir: str = ".", timeout_seconds: 
     hanging forever (this is the fix for the silent-freeze bug)."""
     filename = _filename_for(sentence)
     path = f"{output_dir}/{filename}"
-    communicate = edge_tts.Communicate(sentence, GERMAN_VOICE)
+    communicate = edge_tts.Communicate(sentence, GERMAN_VOICE, rate=SPEECH_RATE)
     await asyncio.wait_for(communicate.save(path), timeout=timeout_seconds)
     return path
