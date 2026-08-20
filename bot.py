@@ -7,15 +7,13 @@ Storage (Step 3), translation (Step 4), TTS (Step 5), and
 packaging (Step 6) are stubbed here as placeholder functions
 that we'll fill in in later steps.
 
-Requirements:
-    pip install python-telegram-bot flask pyairtable deep-translator edge-tts genanki gunicorn
+Requirements (installed on the host in Step 8, not here):
+    pip install python-telegram-bot==21.*
 """
 
 import logging
 import os
 import asyncio
-from threading import Thread
-from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -35,23 +33,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ---- Web Server for Render Health Checks / UptimeRobot ----
-web_app = Flask(__name__)
-
-@web_app.route("/")
-def health_check():
-    return "Anki Telegram Bot is healthy and running!", 200
-
-def run_web_server():
-    # Render binds the port via environment variable PORT (defaulting to 8080 locally)
-    port = int(os.environ.get("PORT", 8080))
-    web_app.run(host="0.0.0.0", port=port)
-
-# ---- Token comes from an environment variable ----
+# ---- Token comes from an environment variable, not hardcoded in this file ----
+# On Railway (Step 8), you'll set TELEGRAM_BOT_TOKEN in the dashboard.
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 # Conversation states
 CHOOSING_PROFILE, CHOOSING_DECK, NEW_DECK_NAME, CHOOSING_FORMAT, RECEIVING_CONTENT = range(5)
+
+# Storage is now real (Airtable via storage.py) instead of an in-memory dict.
+# Every call below needs the Telegram user's id, so profiles/decks are kept
+# separate per person automatically (this is what makes it safe to share
+# with a friend - your data and theirs never mix).
 
 
 # --- Conversation steps ---
@@ -191,6 +183,8 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if fmt == "text":
         sentences = [s.strip() for s in update.message.text.split("\n") if s.strip()]
     else:
+        # .txt / .csv file handling is not wired up yet - only plain text
+        # messages run the full pipeline for now.
         await update.message.reply_text(
             "File uploads aren't wired up to the pipeline yet — for now, "
             "please type or paste your sentence(s) as a text message."
@@ -245,16 +239,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 def main():
-    if not BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable not set.")
-        return
-
-    # Start the Flask web server in a separate background thread
-    server_thread = Thread(target=run_web_server)
-    server_thread.daemon = True
-    server_thread.start()
-    logger.info("Background web server started for Render health checks.")
-
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
