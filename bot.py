@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 # Conversation states
-CHOOSING_PROFILE, CHOOSING_DECK, NEW_DECK_NAME, CHOOSING_FORMAT, RECEIVING_CONTENT = range(5)
+CHOOSING_PROFILE, CHOOSING_DECK, NEW_DECK_NAME, CHOOSING_FORMAT, RECEIVING_CONTENT, CONFIRMING_CONTENT = range(6)
 
 # Storage is now real (Airtable via storage.py) instead of an in-memory dict.
 # Every call below needs the Telegram user's id, so profiles/decks are kept
@@ -191,12 +191,10 @@ async def format_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Logs each sentence, then runs the full pipeline (translate + audio +
-    package) and sends the finished .apkg back in this chat."""
-    profile = context.user_data["profile"]
-    deck = context.user_data["deck"]
+    """Parses the incoming text/file into sentence_items, then shows a
+    confirmation screen instead of processing immediately - catches typos
+    or a misparsed file before spending time on translation/audio."""
     fmt = context.user_data["format"]
-    user_id = context.user_data["telegram_user_id"]
 
     if fmt == "text":
         text_lines = [s.strip() for s in update.message.text.split("\n") if s.strip()]
@@ -237,6 +235,73 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("Unexpected format — please /cancel and start over.")
         return ConversationHandler.END
 
+    context.user_data["pending_items"] = sentence_items
+    return await show_confirmation(update, context, edit=False)
+
+
+async def show_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool) -> int:
+    profile = context.user_data["profile"]
+    deck = context.user_data["deck"]
+    sentence_items = context.user_data["pending_items"]
+
+    MAX_PREVIEW = 10
+    lines = []
+    for item in sentence_items[:MAX_PREVIEW]:
+        if item.get("translation"):
+            lines.append(f"• {item['sentence']} — \"{item['translation']}\" (your translation)")
+        else:
+            lines.append(f"• {item['sentence']}")
+    preview = "\n".join(lines)
+    if len(sentence_items) > MAX_PREVIEW:
+        preview += f"\n...and {len(sentence_items) - MAX_PREVIEW} more"
+
+    text = (
+        f"Found {len(sentence_items)} sentence(s) for {profile} → '{deck}':\n\n"
+        f"{preview}\n\n"
+        f"Proceed?"
+    )
+    buttons = [
+        [InlineKeyboardButton("✅ Confirm", callback_data="confirm:yes")],
+        [InlineKeyboardButton("✏️ Edit (resend)", callback_data="confirm:edit")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
+    ]
+    markup = InlineKeyboardMarkup(buttons)
+    if edit:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.message.reply_text(text, reply_markup=markup)
+    return CONFIRMING_CONTENT
+
+
+async def confirm_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split(":", 1)[1]
+
+    if choice == "edit":
+        fmt = context.user_data["format"]
+        prompts = {
+            "text": "Send your sentence(s) again, one per line if more than one.",
+            "txt": "Send your .txt file again.",
+            "csv": "Send your .csv file again (columns: sentence, translation [optional]).",
+        }
+        await query.edit_message_text(prompts[fmt])
+        return RECEIVING_CONTENT
+
+    # choice == "yes"
+    await query.edit_message_text("Got it — processing now...")
+    return await process_and_deliver(update, context)
+
+
+async def process_and_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Logs each sentence, then runs the full pipeline (translate + audio +
+    package) and sends the finished .apkg back in this chat."""
+    profile = context.user_data["profile"]
+    deck = context.user_data["deck"]
+    user_id = context.user_data["telegram_user_id"]
+    sentence_items = context.user_data["pending_items"]
+    chat = update.effective_chat
+
     logger.info(f"Logging {len(sentence_items)} sentence(s) to Airtable...")
     try:
         for item in sentence_items:
@@ -244,14 +309,12 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.info("Logged to Airtable OK.")
     except Exception as e:
         logger.exception("Failed to log sentences to Airtable")
-        await update.message.reply_text(
+        await chat.send_message(
             f"Couldn't save to Airtable: {e}\n"
             f"Check that the Log table's field names match exactly: "
             f"timestamp, telegram_user_id, profile, deck, sentence, status."
         )
         return ConversationHandler.END
-
-    await update.message.reply_text(f"Got it — processing {len(sentence_items)} sentence(s)...")
 
     try:
         logger.info("Starting pipeline (translate + audio + package)...")
@@ -259,14 +322,14 @@ async def content_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.info(f"Pipeline finished, file at {apkg_path}")
     except Exception as e:
         logger.exception("Pipeline failed")
-        await update.message.reply_text(
+        await chat.send_message(
             f"Something went wrong while processing: {e}\n"
             f"Your sentence(s) are still saved in Airtable as 'queued' — nothing is lost."
         )
         return ConversationHandler.END
 
     with open(apkg_path, "rb") as f:
-        await update.message.reply_document(
+        await chat.send_document(
             document=f,
             filename=f"{deck}.apkg",
             caption=f"{len(sentence_items)} card(s) for {profile} → '{deck}'. Tap to import into Anki.",
@@ -326,6 +389,9 @@ def main():
             RECEIVING_CONTENT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, content_received),
                 MessageHandler(filters.Document.ALL, content_received),
+            ],
+            CONFIRMING_CONTENT: [
+                CallbackQueryHandler(confirm_choice, pattern=r"^confirm:"),
             ],
         },
         fallbacks=[
