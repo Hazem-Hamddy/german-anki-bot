@@ -21,12 +21,19 @@ import hashlib
 import genanki
 
 # Fixed note type (model) shared by every deck - one card layout for all
-# your German decks. Its ID must stay constant forever once cards exist,
-# so it's hardcoded here rather than derived.
-MODEL_ID = 1607392319  # arbitrary fixed number, do not change later
+# your German decks. Its ID must stay constant forever once cards exist
+# under it - so it's hardcoded here rather than derived.
+#
+# NOTE: this ID was bumped once (from 1607392319) because Anki does NOT
+# update an existing note type's templates on import if a note type with
+# the same ID already exists locally - it keeps whatever's already there.
+# That's why adding the reversed card template silently had no effect
+# until this ID changed. From now on, do not change this number again,
+# or the same problem will recur for anyone who's already imported cards.
+MODEL_ID = 1955317842
 NOTE_MODEL = genanki.Model(
     MODEL_ID,
-    "German Sentence Model",
+    "German Sentence Model v2",
     fields=[
         {"name": "German"},
         {"name": "English"},
@@ -34,9 +41,15 @@ NOTE_MODEL = genanki.Model(
     ],
     templates=[
         {
-            "name": "Card 1",
+            "name": "German → English",
             "qfmt": '<div class="german">{{German}}</div><div class="audio">{{Audio}}</div>',
             "afmt": '{{FrontSide}}<hr id="answer"><div class="english">{{English}}</div>',
+        },
+        {
+            "name": "English → German",
+            "qfmt": '<div class="english">{{English}}</div>',
+            "afmt": '{{FrontSide}}<hr id="answer">'
+                    '<div class="german">{{German}}</div><div class="audio">{{Audio}}</div>',
         },
     ],
     css="""
