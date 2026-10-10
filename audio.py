@@ -11,13 +11,19 @@ import hashlib
 import asyncio
 import edge_tts
 
-# German neural voices worth trying, roughly newest/most natural first.
-# To switch, just change GERMAN_VOICE to one of these:
-#   "de-DE-SeraphinaMultilingualNeural"  <- newer, generally the most natural/human-sounding
-#   "de-DE-FlorianMultilingualNeural"    <- newer male voice, also natural
-#   "de-DE-ConradNeural"                 <- older male voice, clear
-#   "de-DE-KatjaNeural"                  <- original default, can sound clipped/fast
-GERMAN_VOICE = "de-DE-SeraphinaMultilingualNeural"
+# German-only voices (these only know German pronunciation, so they can't
+# mistake a short word like "null" for English the way a multilingual
+# voice can). To switch, change GERMAN_VOICE to one of these:
+#   "de-DE-AmalaNeural"                  <- female, German-only (current)
+#   "de-DE-ConradNeural"                 <- male, German-only
+#   "de-DE-KillianNeural"                <- male, German-only
+#   "de-DE-KatjaNeural"                  <- female, German-only, but can sound clipped/fast
+#   "de-DE-SeraphinaMultilingualNeural"  <- multilingual: natural-sounding, but guesses the
+#                                           language from context, so isolated words
+#                                           (e.g. "null") can come out sounding English
+# Voice names can change on Microsoft's side. If one stops working, run
+# `edge-tts --list-voices` on the host to see what's currently available.
+GERMAN_VOICE = "de-DE-AmalaNeural"
 
 # Negative = slower. "-15%" noticeably slows speech without distorting pitch.
 SPEECH_RATE = "-15%"
